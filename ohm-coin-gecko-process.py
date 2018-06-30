@@ -1,3 +1,20 @@
+import sys
+import asyncio
+import random
+import telepot
+from telepot.aio.loop import MessageLoop
+from telepot.aio.delegate import per_chat_id, create_open, pave_event_space
+
+"""
+$ python3.5 guessa.py <token>
+Guess a number:
+1. Send the bot anything to start a game.
+2. The bot randomly picks an integer between 0-99.
+3. You make a guess.
+4. The bot tells you to go higher or lower.
+5. Repeat step 3 and 4, until guess is correct.
+"""
+
 import urllib, json, requests, time
 #import inflect
 
@@ -9,65 +26,58 @@ params = (
     ('localization', 'en'),
 )
 
-response = requests.get('https://api.coingecko.com/api/v3/coins/ohm-coin', headers=headers, params=params)
-#response = requests.get('https://api.coingecko.com/api/v3/coins/ohm-coin', headers=headers)
-print("Status Code: " + str(response.status_code))
-print(response.headers)
+class Player(telepot.aio.helper.ChatHandler):
+    def __init__(self, *args, **kwargs):
+        super(Player, self).__init__(*args, **kwargs)
+        self._answer = random.randint(0,99)
 
-with open('response-data.json', 'w') as outfile:
-    json.dump(response.json(), outfile)
+    def _hint(self, answer, guess):
+        if answer > guess:
+            return 'larger'
+        else:
+            return 'smaller'
 
-time.sleep(1)
+    async def open(self, initial_msg, seed):
+        await self.sender.sendMessage('Guess my number')
+        return True  # prevent on_message() from being called on the initial message
 
-# Curl command to retrieve information
-#curl -X GET "https://api.coingecko.com/api/v3/coins/ohm-coin" -H "accept: application/json" -o ohmcexchanges.json
-# Read ticker information from coingecko and ask user to input data field
-# information by specific coins using their coin index (i.e. Ethereum = 1027)
+    async def on_chat_message(self, msg):
+        content_type, chat_type, chat_id = telepot.glance(msg)
 
-# Set up coin interface index json functionality
-json_coin_index_data = open("ohmcurlinfo.json").read()
-coin_index_data = json.loads(json_coin_index_data)
-print(len(coin_index_data.keys()))
-for x in (1,2,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20):
-    print(str(coin_index_data.keys()[x]))
-    print(coin_index_data[str(coin_index_data.keys()[x])])
-    print(len(coin_index_data.keys()[x]))
+        if content_type != 'text':
+            await self.sender.sendMessage('Give me a number, please.')
+            return
 
+        try:
+           guess = int(msg['text'])
+        except ValueError:
+            await self.sender.sendMessage('Give me a number, please.')
+            return
 
-last_updated = coin_index_data['last_updated']
-developer_data = coin_index_data['developer_data']
-community_data = coin_index_data['community_data']
-community_data
+        # check the guess against the answer ...
+        if guess != self._answer:
+            response = requests.get('http://numbersapi.com/'+ str(guess), headers=headers, params=params)
+            # give a descriptive hint
+            hint = self._hint(self._answer, guess)
+            await self.sender.sendMessage( "try something " + hint + "\n" + response.text)
+        else:
+            await self.sender.sendMessage('Correct!')
+            self.close()
 
-print(last_updated)
-print(developer_data)
-print(community_data)
-
-#print(coin_index_data['description'])
-#user_coin_choice = raw_input("What coin would you like info for?: ")
-#coinkeys = coin_index_data.keys()
-for key in coin_index_data.keys():
-    print(key)
-
-user_key_choice = raw_input("What key would you like to search for??: ")
-
-if user_key_choice in coin_index_data.keys():
-    #getticker(coin_index_data[user_coin_choice])
-    for key in coin_index_data.keys():
-        if key in user_key_choice:
-            print(key)
-            print(coin_index_data[key])
-else:
-    print("That is not a valid choice. Please use full name with caps. (i.e. Ethereum)\nPlease Try again.\n")
-    user_key_choice = raw_input("What key would you like to search for??: ")
-    if user_key_choice in coin_index_data.keys():
-        print(coin_index_data[user_key_choice])
-    else:
-        print("I'm sorry that is still not an accepable key name")
+    async def on__idle(self, event):
+        await self.sender.sendMessage('Game expired. The answer is %d.\n Please frequent the @VergeZoo \n Calling out  @XVGPufferfish,  @GorillaChain, @Simple_Dolphin, and @XVGHawk' % self._answer)
+        self.close()
 
 
-'''
-for key in coin_index_data.keys():
-    print(key)
-    print(coin_index_data[key])
-'''
+TOKEN = sys.argv[1]
+
+bot = telepot.aio.DelegatorBot(TOKEN, [
+    pave_event_space()(
+        per_chat_id(), create_open, Player, timeout=60),
+])
+
+loop = asyncio.get_event_loop()
+loop.create_task(MessageLoop(bot).run_forever())
+print('Listening ...')
+
+loop.run_forever()
